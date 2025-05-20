@@ -1,0 +1,13 @@
+# requirements.txt
+#
+# List of Python packages required for the Blog Automation Workflow.
+# Install these using: pip install -r requirements.txt
+
+google-generativeai
+requests
+python-dotenv
+pyperclip # For clipboard functionality
+openai>=1.25,<2.0 # For OpenAI API
+# Optional, but recommended for Markdown->HTML conversion if needed later:
+markdown
+Pillow # For potential image handling 
