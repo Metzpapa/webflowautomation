@@ -30,7 +30,7 @@ CHATBOT_URL = os.getenv("CHATBOT_URL", "https://www.valuemate.ai/#More")
 # --- LLM Configuration ---
 
 # Default Gemini model to use for generation
-DEFAULT_GEMINI_MODEL = "gemini-2.5-pro-exp-03-25" # Or "gemini-1.5-pro", etc.
+DEFAULT_GEMINI_MODEL = "gemini-2.5-pro-preview-05-06" # Or "gemini-1.5-pro", etc.
 
 # --- File Paths ---
 
