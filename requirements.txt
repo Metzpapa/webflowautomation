@@ -10,4 +10,7 @@ pyperclip # For clipboard functionality
 openai>=1.25,<2.0 # For OpenAI API
 # Optional, but recommended for Markdown->HTML conversion if needed later:
 markdown
-Pillow # For potential image handling 
+Pillow # For potential image handling
+gspread # For Google Sheets integration
+google-auth # For Google authentication
+boto3 # For AWS S3 integration 

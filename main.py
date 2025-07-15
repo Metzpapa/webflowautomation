@@ -46,7 +46,6 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 # Now import project modules
 import config
 import llm_handler
-import webflow_client
 
 # --- Helper Functions ---
 
@@ -133,8 +132,23 @@ def prepare_webflow_payload(slug: str, body_content: str, metadata: dict, image_
 
 # --- Main Execution Logic --- (Refactored for Loop) ---
 
-def main(num_posts: int, generate_linkedin: bool, auto_mode: bool):
+def main(num_posts: int, generate_linkedin: bool, auto_mode: bool, provider: str = "webflow"):
     """Runs the main blog post generation and publishing workflow for num_posts."""
+    # Import and configure CMS provider
+    if provider == "webflow":
+        from cms_providers.webflow_provider import create_cms_item as webflow_publish
+        publish_fn = webflow_publish
+        upload_asset_fn = None
+        try:
+            from cms_providers.webflow_provider import upload_asset_from_bytes
+            upload_asset_fn = upload_asset_from_bytes
+        except ImportError:
+            print("WARN: webflow upload_asset_from_bytes not available")
+    else:  # framer-sheets
+        from cms_providers.framer_sheets_provider import FramerSheetsProvider
+        framer_provider = FramerSheetsProvider()
+        publish_fn = framer_provider.publish
+        upload_asset_fn = None  # Framer provider handles images internally
     print("--- Starting Blog Automation Workflow ---")
 
     # --- One-Time Setup --- 
@@ -369,7 +383,7 @@ def main(num_posts: int, generate_linkedin: bool, auto_mode: bool):
                             md5_hash = None
                         # --- End MD5 Hash ---
 
-                        if md5_hash:
+                        if md5_hash and provider == "webflow":
                             # Use the pre-calculated slug for the filename
                             # slug_base = re.sub(r'[^a-z0-9-]', '', raw_title.lower().replace(" ", "-")).strip('-')
                             # slug_base = slug_base or "untitled-post"
@@ -385,12 +399,17 @@ def main(num_posts: int, generate_linkedin: bool, auto_mode: bool):
                             filename = f"{image_slug}-main.png"
                             print(f"  Using filename for upload: {filename}") # Added print for filename
 
-                            # Upload the COMPRESSED image bytes as an asset, pass hash
-                            image_file_id, hosted_image_url = webflow_client.upload_asset_from_bytes(
-                                compressed_image_bytes, filename, md5_hash
-                            )
-                            if not image_file_id or not hosted_image_url:
-                                print("  WARN: Failed to upload compressed image to Webflow Assets or get required data.")
+                            # Upload the COMPRESSED image bytes as an asset, pass hash (Webflow only)
+                            if upload_asset_fn:
+                                image_file_id, hosted_image_url = upload_asset_fn(
+                                    compressed_image_bytes, filename, md5_hash
+                                )
+                                if not image_file_id or not hosted_image_url:
+                                    print("  WARN: Failed to upload compressed image to Webflow Assets or get required data.")
+                                    image_file_id = None
+                                    hosted_image_url = None
+                            else:
+                                print("  WARN: Asset upload function not available for Webflow provider.")
                                 image_file_id = None
                                 hosted_image_url = None
                 else:
@@ -398,11 +417,14 @@ def main(num_posts: int, generate_linkedin: bool, auto_mode: bool):
         else:
              print(f"  Skipping image generation for post {i+1}: No image_description found in metadata.")
 
-        # 4. Prepare Webflow Payload
-        print(f"\nStep 4.{i+1}: Preparing Webflow Payload...")
-        # Pass the pre-calculated slug
-        webflow_payload = prepare_webflow_payload(slug, markdown_body, metadata, image_file_id, hosted_image_url)
-        # print(f"  DEBUG Payload: {json.dumps(webflow_payload, indent=2)}") # Optional debug
+        # 4. Prepare Payload
+        print(f"\nStep 4.{i+1}: Preparing Payload...")
+        if provider == "webflow":
+            # Pass the pre-calculated slug
+            payload = prepare_webflow_payload(slug, markdown_body, metadata, image_file_id, hosted_image_url)
+        else:
+            # For framer-sheets, we'll pass the data directly to the publish function
+            payload = None
 
         # 5. User Confirmation (or Skip in Auto Mode)
         print(f"\nStep 5.{i+1}: User Confirmation...")
@@ -433,9 +455,17 @@ def main(num_posts: int, generate_linkedin: bool, auto_mode: bool):
         # Only proceed if confirmed (manually or automatically)
         new_item_id = None # Initialize new_item_id outside the block
         if proceed_to_create:
-            # 6. Create Webflow CMS Item
-            print(f"\nStep 6.{i+1}: Creating Webflow CMS Item...")
-            new_item_id = webflow_client.create_cms_item(webflow_payload) # Assign result here
+            # 6. Create CMS Item
+            print(f"\nStep 6.{i+1}: Creating CMS Item...")
+            if provider == "webflow":
+                new_item_id = publish_fn(payload) # Assign result here
+            else:  # framer-sheets
+                new_item_id = publish_fn(
+                    slug=slug,
+                    html_body=markdown_body,
+                    metadata=metadata,
+                    image_bytes=compressed_image_bytes  # may be None
+                )
 
             # 7. Update Summaries and Finish Loop Iteration (Conditional on Success)
             # Moved finalization steps inside the 'if proceed_to_create' block
@@ -519,10 +549,16 @@ if __name__ == "__main__":
         action="store_true", # Makes it a flag, default False
         help="Enable auto mode: Skips user confirmation and adds a 5-minute delay between posts."
     )
+    parser.add_argument(
+        "--provider",
+        default="webflow",
+        choices=["webflow", "framer-sheets"],
+        help="CMS provider to use: webflow or framer-sheets (default: webflow)."
+    )
     args = parser.parse_args()
 
     if args.num_posts < 1:
         print("Error: Number of posts must be at least 1.")
     else:
-        # Pass the linkedin and auto flags to the main function
-        main(args.num_posts, args.linkedin, args.auto)
+        # Pass the linkedin, auto, and provider flags to the main function
+        main(args.num_posts, args.linkedin, args.auto, args.provider)
