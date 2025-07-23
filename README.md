@@ -40,6 +40,8 @@ python main.py -n 2 --auto --linkedin
 python main.py --provider framer-sheets
 python main.py --provider framer-sheets -n 3 --auto
 python main.py --provider framer-sheets --auto --linkedin
+
+python main.py --provider framer-sheets --auto
 ```
 
 ## Command Line Options

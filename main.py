@@ -98,8 +98,6 @@ def prepare_webflow_payload(slug: str, body_content: str, metadata: dict, image_
     except Exception as e:
         print(f"WARN: Failed to convert/clean Markdown to HTML: {e}. Sending raw Markdown instead.")
         html_body_content = body_content # Fallback
-    # slug = re.sub(r'[^a-z0-9-]', '', raw_title.lower().replace(" ", "-")).strip('-') # Slug is now passed in
-    # slug = slug or "untitled-post" # Slug is now passed in
 
     field_data = {
         "name": raw_title,
@@ -151,7 +149,7 @@ def main(num_posts: int, generate_linkedin: bool, auto_mode: bool, provider: str
         upload_asset_fn = None  # Framer provider handles images internally
     print("--- Starting Blog Automation Workflow ---")
 
-    # --- One-Time Setup --- 
+    # --- One-Time Setup ---
     print("\nStep 0: Initializing Clients & Uploading Context...")
     if not llm_handler.configure_genai():
         print("ERROR: Failed to configure Gemini library. Exiting.")
@@ -280,142 +278,136 @@ def main(num_posts: int, generate_linkedin: bool, auto_mode: bool, provider: str
         print(f"  Calculated final URL: {blog_post_url}")
         # --- End Slug/URL Calculation ---
 
-        # 3. Generate, Compress, and Upload Image
-        print(f"\nStep 3.{i+1}: Generating, Compressing, and Uploading Image...")
+        # 3. Image Handling (Conditional)
+        print(f"\nStep 3.{i+1}: Image Handling...")
         image_file_id = None
         hosted_image_url = None
         compressed_image_bytes = None
-        image_description = metadata.get("image_description")
 
-        if image_description:
-            print(f"  Using description: '{image_description}'")
-            if not client:
-                print("  ERROR: OpenAI client not initialized. Skipping image for this post.")
-                original_image_bytes = None # Skip image part
-            else:
-                max_retries_img = 3
-                retry_delay_img = 30  # seconds
-                original_image_bytes = None # Initialize
-                for attempt in range(max_retries_img):
-                    try:
-                        print(f"  Generating image with GPT Image model… (Attempt {attempt+1}/{max_retries_img})")
-                        response = client.images.generate(
-                            model="gpt-image-1",
-                            prompt=image_description,
-                            n=1,
-                            size=config.OPENAI_IMAGE_SIZE
-                        )
+        # --- MODIFIED SECTION: Image generation only runs for the 'webflow' provider ---
+        if provider == "webflow":
+            print("  Provider is 'webflow', proceeding with image generation and upload.")
+            image_description = metadata.get("image_description")
 
-                        # --- MODIFIED SECTION ---
-                        if response.data and hasattr(response.data[0], 'b64_json') and response.data[0].b64_json:
-                            base64_image_data = response.data[0].b64_json
-                            print(f"  Base64 image data received. Decoding...")
-                            try:
-                                original_image_bytes = base64.b64decode(base64_image_data)
-                                print(f"  Image decoded successfully.")
-                                if hasattr(response.data[0], 'revised_prompt'):
-                                    print(f"  Revised prompt: {response.data[0].revised_prompt}")
-                            except base64.binascii.Error as b64_err:
-                                print(f"  ERROR: Failed to decode base64 image data: {b64_err}. Skipping image for this post.")
-                                original_image_bytes = None
-                                break
-                            except Exception as e:
-                                print(f"  ERROR: An unexpected error occurred during base64 decoding: {e}. Skipping image for this post.")
-                                original_image_bytes = None
-                                break
-                        else:
-                            print(f"  ERROR: OpenAI API did not return valid b64_json image data for the prompt: '{image_description}'.")
-                            if response.data and len(response.data) > 0:
-                                print(f"  Response data[0] content: {response.data[0]}")
-                            elif hasattr(response, 'error') and response.error:
-                                print(f"  API Error Code: {getattr(response.error, 'code', 'N/A')}")
-                                print(f"  API Error Message: {getattr(response.error, 'message', 'N/A')}")
-                            else:
-                                print(f"  Full API response: {response}")
-                            original_image_bytes = None
-                            break
-                        if original_image_bytes:
-                            break
-                        # --- END MODIFIED SECTION ---
-                    except openai.APIError as e:
-                        print(f"  ERROR: OpenAI API error on attempt {attempt+1}: {e}")
-                        if hasattr(e, 'http_status'):
-                            print(f"    HTTP Status: {e.http_status}")
-                        if hasattr(e, 'code'):
-                            print(f"    Error Code: {e.code}")
-                        if isinstance(e, openai.RateLimitError) and attempt < max_retries_img - 1:
-                            print(f"    Rate limit hit. Retrying in {retry_delay_img}s...")
-                            time.sleep(retry_delay_img)
-                            continue
-                        else:
-                            original_image_bytes = None
-                            break
-                    except Exception as e:
-                        print(f"  ERROR: Unexpected error during image generation on attempt {attempt+1}: {e}")
-                        original_image_bytes = None
-                        break
-
-                if original_image_bytes:
-                    print(f"  Image generated successfully (Original size: {len(original_image_bytes) / 1024:.1f} KB). Compressing...")
-
-                    # --- Compress Image using Pillow ---
-                    try:
-                        img = Image.open(BytesIO(original_image_bytes))
-                        # Convert to RGB if it has an alpha channel, as optimize might work better
-                        if img.mode in ('RGBA', 'P'):
-                           img = img.convert('RGB')
-                        
-                        buffer = BytesIO()
-                        img.save(buffer, format='PNG', optimize=True) # Save as optimized PNG
-                        compressed_image_bytes = buffer.getvalue()
-                        print(f"  Image compressed successfully (New size: {len(compressed_image_bytes) / 1024:.1f} KB).")
-                    except Exception as e:
-                        print(f"  WARN: Failed to compress image: {e}. Uploading original image bytes.")
-                        compressed_image_bytes = original_image_bytes # Fallback
-                    # --- End Compression ---
-
-                    if compressed_image_bytes:
+            if image_description:
+                print(f"  Using description: '{image_description}'")
+                if not client:
+                    print("  ERROR: OpenAI client not initialized. Skipping image for this post.")
+                    original_image_bytes = None # Skip image part
+                else:
+                    max_retries_img = 3
+                    retry_delay_img = 30  # seconds
+                    original_image_bytes = None # Initialize
+                    for attempt in range(max_retries_img):
                         try:
-                            md5_hash = hashlib.md5(compressed_image_bytes).hexdigest()
-                            print(f"  Calculated MD5 Hash for upload: {md5_hash}")
+                            print(f"  Generating image with GPT Image model… (Attempt {attempt+1}/{max_retries_img})")
+                            response = client.images.generate(
+                                model="gpt-image-1",
+                                prompt=image_description,
+                                n=1,
+                                size=config.OPENAI_IMAGE_SIZE
+                            )
+
+                            if response.data and hasattr(response.data[0], 'b64_json') and response.data[0].b64_json:
+                                base64_image_data = response.data[0].b64_json
+                                print(f"  Base64 image data received. Decoding...")
+                                try:
+                                    original_image_bytes = base64.b64decode(base64_image_data)
+                                    print(f"  Image decoded successfully.")
+                                    if hasattr(response.data[0], 'revised_prompt'):
+                                        print(f"  Revised prompt: {response.data[0].revised_prompt}")
+                                except base64.binascii.Error as b64_err:
+                                    print(f"  ERROR: Failed to decode base64 image data: {b64_err}. Skipping image for this post.")
+                                    original_image_bytes = None
+                                    break
+                                except Exception as e:
+                                    print(f"  ERROR: An unexpected error occurred during base64 decoding: {e}. Skipping image for this post.")
+                                    original_image_bytes = None
+                                    break
+                            else:
+                                print(f"  ERROR: OpenAI API did not return valid b64_json image data for the prompt: '{image_description}'.")
+                                if response.data and len(response.data) > 0:
+                                    print(f"  Response data[0] content: {response.data[0]}")
+                                elif hasattr(response, 'error') and response.error:
+                                    print(f"  API Error Code: {getattr(response.error, 'code', 'N/A')}")
+                                    print(f"  API Error Message: {getattr(response.error, 'message', 'N/A')}")
+                                else:
+                                    print(f"  Full API response: {response}")
+                                original_image_bytes = None
+                                break
+                            if original_image_bytes:
+                                break
+                        except openai.APIError as e:
+                            print(f"  ERROR: OpenAI API error on attempt {attempt+1}: {e}")
+                            if hasattr(e, 'http_status'):
+                                print(f"    HTTP Status: {e.http_status}")
+                            if hasattr(e, 'code'):
+                                print(f"    Error Code: {e.code}")
+                            if isinstance(e, openai.RateLimitError) and attempt < max_retries_img - 1:
+                                print(f"    Rate limit hit. Retrying in {retry_delay_img}s...")
+                                time.sleep(retry_delay_img)
+                                continue
+                            else:
+                                original_image_bytes = None
+                                break
                         except Exception as e:
-                            print(f"  ERROR: Failed to calculate MD5 hash for compressed bytes: {e}. Skipping image upload.")
-                            md5_hash = None
-                        # --- End MD5 Hash ---
+                            print(f"  ERROR: Unexpected error during image generation on attempt {attempt+1}: {e}")
+                            original_image_bytes = None
+                            break
 
-                        if md5_hash and provider == "webflow":
-                            # Use the pre-calculated slug for the filename
-                            # slug_base = re.sub(r'[^a-z0-9-]', '', raw_title.lower().replace(" ", "-")).strip('-')
-                            # slug_base = slug_base or "untitled-post"
+                    if original_image_bytes:
+                        print(f"  Image generated successfully (Original size: {len(original_image_bytes) / 1024:.1f} KB). Compressing...")
+
+                        try:
+                            img = Image.open(BytesIO(original_image_bytes))
+                            if img.mode in ('RGBA', 'P'):
+                               img = img.convert('RGB')
                             
-                            # --- Truncate slug if filename would be too long ---
-                            max_slug_len = 90 # Reserve ~10 chars for "-main.png" suffix and buffer
-                            image_slug = slug # Start with the main post slug
-                            if len(slug) > max_slug_len:
-                                image_slug = slug[:max_slug_len]
-                                print(f"  WARN: Original slug \'{slug}\' was too long for image filename, truncated to: {image_slug}")
-                            # --- End Truncation ---
+                            buffer = BytesIO()
+                            img.save(buffer, format='PNG', optimize=True)
+                            compressed_image_bytes = buffer.getvalue()
+                            print(f"  Image compressed successfully (New size: {len(compressed_image_bytes) / 1024:.1f} KB).")
+                        except Exception as e:
+                            print(f"  WARN: Failed to compress image: {e}. Uploading original image bytes.")
+                            compressed_image_bytes = original_image_bytes
 
-                            filename = f"{image_slug}-main.png"
-                            print(f"  Using filename for upload: {filename}") # Added print for filename
+                        if compressed_image_bytes:
+                            try:
+                                md5_hash = hashlib.md5(compressed_image_bytes).hexdigest()
+                                print(f"  Calculated MD5 Hash for upload: {md5_hash}")
+                            except Exception as e:
+                                print(f"  ERROR: Failed to calculate MD5 hash for compressed bytes: {e}. Skipping image upload.")
+                                md5_hash = None
 
-                            # Upload the COMPRESSED image bytes as an asset, pass hash (Webflow only)
-                            if upload_asset_fn:
-                                image_file_id, hosted_image_url = upload_asset_fn(
-                                    compressed_image_bytes, filename, md5_hash
-                                )
-                                if not image_file_id or not hosted_image_url:
-                                    print("  WARN: Failed to upload compressed image to Webflow Assets or get required data.")
+                            if md5_hash:
+                                max_slug_len = 90
+                                image_slug = slug
+                                if len(slug) > max_slug_len:
+                                    image_slug = slug[:max_slug_len]
+                                    print(f"  WARN: Original slug \'{slug}\' was too long for image filename, truncated to: {image_slug}")
+
+                                filename = f"{image_slug}-main.png"
+                                print(f"  Using filename for upload: {filename}")
+
+                                if upload_asset_fn:
+                                    image_file_id, hosted_image_url = upload_asset_fn(
+                                        compressed_image_bytes, filename, md5_hash
+                                    )
+                                    if not image_file_id or not hosted_image_url:
+                                        print("  WARN: Failed to upload compressed image to Webflow Assets or get required data.")
+                                        image_file_id = None
+                                        hosted_image_url = None
+                                else:
+                                    print("  WARN: Asset upload function not available for Webflow provider.")
                                     image_file_id = None
                                     hosted_image_url = None
-                            else:
-                                print("  WARN: Asset upload function not available for Webflow provider.")
-                                image_file_id = None
-                                hosted_image_url = None
-                else:
-                    print("  ERROR: OpenAI image generation failed after retries or returned no image data.")
+                    else:
+                        print("  ERROR: OpenAI image generation failed after retries or returned no image data.")
+            else:
+                 print(f"  Skipping image generation for post {i+1}: No image_description found in metadata.")
         else:
-             print(f"  Skipping image generation for post {i+1}: No image_description found in metadata.")
+            print("  Provider is 'framer-sheets', skipping image generation and upload.")
+        # --- END MODIFIED SECTION ---
 
         # 4. Prepare Payload
         print(f"\nStep 4.{i+1}: Preparing Payload...")
@@ -441,12 +433,11 @@ def main(num_posts: int, generate_linkedin: bool, auto_mode: bool, provider: str
 
         if not auto_mode:
             # Manual mode: Ask for confirmation
-            confirm = input(f"Proceed to create item {i+1} in Webflow? (y/n): ").lower()
+            confirm = input(f"Proceed to create item {i+1} in {provider}? (y/n): ").lower()
             if confirm == 'y':
                 proceed_to_create = True
             else:
-                print("Operation cancelled by user for this post. Skipping Webflow creation.")
-                # proceed_to_create remains False
+                print(f"Operation cancelled by user for this post. Skipping {provider} creation.")
         else:
             # Auto mode: Skip confirmation input
             print("Auto mode enabled: Skipping user confirmation input and proceeding automatically...")
@@ -456,7 +447,7 @@ def main(num_posts: int, generate_linkedin: bool, auto_mode: bool, provider: str
         new_item_id = None # Initialize new_item_id outside the block
         if proceed_to_create:
             # 6. Create CMS Item
-            print(f"\nStep 6.{i+1}: Creating CMS Item...")
+            print(f"\nStep 6.{i+1}: Creating CMS Item via {provider} provider...")
             if provider == "webflow":
                 new_item_id = publish_fn(payload) # Assign result here
             else:  # framer-sheets
@@ -464,18 +455,19 @@ def main(num_posts: int, generate_linkedin: bool, auto_mode: bool, provider: str
                     slug=slug,
                     html_body=markdown_body,
                     metadata=metadata,
-                    image_bytes=compressed_image_bytes  # may be None
+                    image_bytes=compressed_image_bytes  # will be None for this provider
                 )
 
             # 7. Update Summaries and Finish Loop Iteration (Conditional on Success)
-            # Moved finalization steps inside the 'if proceed_to_create' block
             print(f"\nStep 7.{i+1}: Finalizing...")
             if new_item_id:
-                print(f"Workflow successful for post {i+1}! New item created with ID: {new_item_id}")
+                print(f"Workflow successful for post {i+1}! New item created with ID/Slug: {new_item_id}")
                 posts_created_count += 1
                 # --- Save Summary and URL ---
                 new_summary = metadata.get("excerpt_page")
                 if new_summary:
+                    # Note: This URL is Webflow-specific. For Framer, the URL structure might differ.
+                    # This is acceptable for now as the summary file's main purpose is preventing topic duplication.
                     blog_post_url = config.WEBFLOW_PUBLISHED_URL_BASE + slug
                     save_summary(config.SUMMARIES_FILE_PATH, new_summary, blog_post_url)
                     previous_summaries.append({'summary': new_summary, 'url': blog_post_url})
@@ -486,43 +478,34 @@ def main(num_posts: int, generate_linkedin: bool, auto_mode: bool, provider: str
                 # --- Generate LinkedIn Post (if flag is set) ---
                 if generate_linkedin:
                     print(f"\nStep 7a.{i+1}: Generating LinkedIn Post Draft...")
-                    # Pass the necessary arguments: full body, final URL, extracted links
                     linkedin_draft = llm_handler.generate_linkedin_post(
-                        model_name=config.DEFAULT_GEMINI_MODEL, # Or a faster/cheaper model if suitable
-                        blog_content_snippet=markdown_body, # Pass the full markdown body
+                        model_name=config.DEFAULT_GEMINI_MODEL,
+                        blog_content_snippet=markdown_body,
                         new_blog_post_url=blog_post_url,
                         interlinks=extracted_interlinks
                     )
                     if linkedin_draft:
                         chatbot_url = config.CHATBOT_URL
-                        # Apply chatbot URL replacement (if any)
-                        final_post = linkedin_draft.replace("[CHATBOT_URL]", chatbot_url) # Keep chatbot replacement for now
+                        final_post = linkedin_draft.replace("[CHATBOT_URL]", chatbot_url)
 
-                        # Print the draft
                         print("\n" + "-"*15 + " LinkedIn Post Draft " + "-"*15)
                         print(final_post)
                         print("-"*51 + "\n")
 
-                        # --- ADDED CLIPBOARD COPY ---
                         if clipboard_available:
                             try:
                                 pyperclip.copy(final_post)
                                 print(">>> LinkedIn draft copied to clipboard! <<<")
                             except Exception as clip_err:
                                 print(f"WARN: Failed to copy LinkedIn draft to clipboard: {clip_err}")
-                        # --- END ADDED CLIPBOARD COPY ---
-
                     else:
                         print("  WARN: Failed to generate LinkedIn post draft.")
                 # --- End LinkedIn Post Generation ---
 
             else: # new_item_id is None (creation failed)
-                print(f"Workflow failed for post {i+1}. Could not create item in Webflow.")
-        # else: # User cancelled or auto mode was off and confirmation != 'y'
-            # Message already printed if cancelled
-            # pass
+                print(f"Workflow failed for post {i+1}. Could not create item in {provider}.")
 
-        # Add delay between posts (except after the last one), regardless of success/failure/skip
+        # Add delay between posts (except after the last one)
         if i < num_posts - 1:
              print(f"\n--- Pausing for 5 minutes before starting post {i+2}/{num_posts}... ---")
              time.sleep(300) # 5 minutes
@@ -532,7 +515,7 @@ def main(num_posts: int, generate_linkedin: bool, auto_mode: bool, provider: str
     print(f"\n--- Blog Automation Workflow Finished --- ({posts_created_count}/{num_posts} posts successfully created) ---")
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Generate and publish Webflow blog posts.")
+    parser = argparse.ArgumentParser(description="Generate and publish blog posts.")
     parser.add_argument(
         "-n", "--num-posts",
         type=int,
@@ -553,12 +536,11 @@ if __name__ == "__main__":
         "--provider",
         default="webflow",
         choices=["webflow", "framer-sheets"],
-        help="CMS provider to use: webflow or framer-sheets (default: webflow)."
+        help="CMS provider to use: webflow or framer-sheets (default: framer-sheets)." # <-- Updated the help text
     )
     args = parser.parse_args()
 
     if args.num_posts < 1:
         print("Error: Number of posts must be at least 1.")
     else:
-        # Pass the linkedin, auto, and provider flags to the main function
         main(args.num_posts, args.linkedin, args.auto, args.provider)

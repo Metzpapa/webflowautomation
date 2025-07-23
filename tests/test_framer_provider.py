@@ -1,33 +1,42 @@
+# webflowautomation/tests/test_framer_provider.py
+
 import unittest
-from unittest.mock import patch, MagicMock
-import datetime as dt
+from unittest.mock import patch
 from cms_providers.framer_sheets_provider import FramerSheetsProvider
 
-
 class TestFramerSheetsProvider(unittest.TestCase):
+    """
+    Unit tests for the FramerSheetsProvider.
+    These tests verify that the provider correctly formats data for Google Sheets
+    and explicitly ignores image data, as per the new requirements.
+    """
+
     def setUp(self):
+        """Set up a new FramerSheetsProvider instance for each test."""
         self.provider = FramerSheetsProvider()
 
-    @patch('cms_providers.framer_sheets_provider.upload_png')
     @patch('cms_providers.framer_sheets_provider.sheets_upsert')
-    def test_publish_with_image(self, mock_sheets_upsert, mock_upload_png):
-        # Mock the upload_png function
-        mock_upload_png.return_value = "https://example.com/image.png"
-        mock_sheets_upsert.return_value = "test-slug"
+    def test_publish_formats_row_correctly_and_ignores_image(self, mock_sheets_upsert):
+        """
+        Verify that publish() creates a correct row for Google Sheets,
+        converts markdown to HTML, and sets image_url to an empty string
+        even when image_bytes are provided.
+        """
+        # Arrange: Mock the sheets client and prepare test data
+        mock_sheets_upsert.return_value = "test-slug-1"
         
-        # Test data
-        slug = "test-slug"
-        html_body = "# Test Content\n\nThis is a test post."
+        slug = "test-slug-1"
+        html_body = "# Test Header\n\nThis is a test."
         metadata = {
-            "title": "Test Post",
-            "excerpt_page": "Test excerpt for page",
-            "excerpt_featured": "Test excerpt for featured",
-            "reading_time": 5,
-            "_draft": False
+            "title": "Test Post Title",
+            "excerpt_page": "This is the page excerpt.",
+            "excerpt_featured": "This is the featured excerpt.",
+            "reading_time": 3,
         }
-        image_bytes = b"fake_image_bytes"
+        # Provide image bytes to ensure they are explicitly ignored by the method
+        image_bytes = b"some_fake_image_data"
         
-        # Call the publish method
+        # Act: Call the publish method
         result = self.provider.publish(
             slug=slug,
             html_body=html_body,
@@ -35,100 +44,90 @@ class TestFramerSheetsProvider(unittest.TestCase):
             image_bytes=image_bytes
         )
         
-        # Verify the result
-        self.assertEqual(result, "test-slug")
+        # Assert: Check the results and the data passed to the mock
+        self.assertEqual(result, "test-slug-1")
         
-        # Verify upload_png was called
-        mock_upload_png.assert_called_once_with(image_bytes)
-        
-        # Verify sheets_upsert was called with correct data
         mock_sheets_upsert.assert_called_once()
+        # Get the dictionary that was passed to sheets_upsert
         call_args = mock_sheets_upsert.call_args[0][0]
         
-        self.assertEqual(call_args["name"], "Test Post")
-        self.assertEqual(call_args["slug"], "test-slug")
-        self.assertEqual(call_args["excerpt_page"], "Test excerpt for page")
-        self.assertEqual(call_args["excerpt_featured"], "Test excerpt for featured")
-        self.assertEqual(call_args["reading_time"], 5)
-        self.assertEqual(call_args["image_url"], "https://example.com/image.png")
-        self.assertEqual(call_args["draft"], "FALSE")
-        self.assertIn("body_html", call_args)
+        self.assertEqual(call_args["name"], "Test Post Title")
+        self.assertEqual(call_args["slug"], "test-slug-1")
+        self.assertEqual(call_args["excerpt_page"], "This is the page excerpt.")
+        self.assertEqual(call_args["reading_time"], 3)
+        self.assertEqual(call_args["body_html"], "<h1>Test Header</h1>\n<p>This is a test.</p>")
+        
+        # This is the most important assertion for the new logic:
+        # Verify the image_url is an empty string, proving S3 upload was skipped.
+        self.assertEqual(call_args["image_url"], "")
+        
         self.assertIn("created_at", call_args)
 
-    @patch('cms_providers.framer_sheets_provider.upload_png')
     @patch('cms_providers.framer_sheets_provider.sheets_upsert')
-    def test_publish_without_image(self, mock_sheets_upsert, mock_upload_png):
-        # Mock the sheets_upsert function
-        mock_sheets_upsert.return_value = "test-slug-no-image"
-        
-        # Test data
-        slug = "test-slug-no-image"
-        html_body = "# Test Content\n\nThis is a test post without image."
-        metadata = {
-            "title": "Test Post No Image",
-            "excerpt_page": "Test excerpt for page",
-            "excerpt_featured": "Test excerpt for featured",
-            "reading_time": 3
-        }
-        image_bytes = None
-        
-        # Call the publish method
-        result = self.provider.publish(
-            slug=slug,
-            html_body=html_body,
-            metadata=metadata,
-            image_bytes=image_bytes
-        )
-        
-        # Verify the result
-        self.assertEqual(result, "test-slug-no-image")
-        
-        # Verify upload_png was NOT called
-        mock_upload_png.assert_not_called()
-        
-        # Verify sheets_upsert was called with correct data
-        mock_sheets_upsert.assert_called_once()
-        call_args = mock_sheets_upsert.call_args[0][0]
-        
-        self.assertEqual(call_args["name"], "Test Post No Image")
-        self.assertEqual(call_args["slug"], "test-slug-no-image")
-        self.assertEqual(call_args["image_url"], "")
-        self.assertEqual(call_args["draft"], "TRUE")  # Default draft status
-
-    @patch('cms_providers.framer_sheets_provider.upload_png')
-    @patch('cms_providers.framer_sheets_provider.sheets_upsert')
-    def test_publish_with_draft_status(self, mock_sheets_upsert, mock_upload_png):
-        # Mock the sheets_upsert function
-        mock_sheets_upsert.return_value = "test-slug-draft"
-        
-        # Test data
+    def test_publish_handles_draft_status_true(self, mock_sheets_upsert):
+        """
+        Verify that if metadata contains `_draft: True`, the row's 'draft'
+        field is set to "TRUE".
+        """
+        # Arrange
         slug = "test-slug-draft"
-        html_body = "# Draft Content"
         metadata = {
             "title": "Draft Post",
-            "excerpt_page": "Draft excerpt",
-            "excerpt_featured": "Draft featured",
-            "reading_time": 2,
-            "_draft": True
+            "_draft": True,
+            "excerpt_page": "", "excerpt_featured": "", "reading_time": 1
         }
-        image_bytes = None
         
-        # Call the publish method
-        result = self.provider.publish(
-            slug=slug,
-            html_body=html_body,
-            metadata=metadata,
-            image_bytes=image_bytes
-        )
+        # Act
+        self.provider.publish(slug=slug, html_body="", metadata=metadata, image_bytes=None)
         
-        # Verify the result
-        self.assertEqual(result, "test-slug-draft")
-        
-        # Verify sheets_upsert was called with correct data
+        # Assert
         mock_sheets_upsert.assert_called_once()
         call_args = mock_sheets_upsert.call_args[0][0]
-        
         self.assertEqual(call_args["draft"], "TRUE")
+
+    @patch('cms_providers.framer_sheets_provider.sheets_upsert')
+    def test_publish_defaults_to_draft_true(self, mock_sheets_upsert):
+        """
+        Verify that if metadata does NOT contain a `_draft` key, the row's
+        'draft' field defaults to "TRUE".
+        """
+        # Arrange
+        slug = "test-slug-default-draft"
+        # Metadata dictionary without the '_draft' key
+        metadata = {
+            "title": "Default Draft Post",
+            "excerpt_page": "", "excerpt_featured": "", "reading_time": 1
+        }
+        
+        # Act
+        self.provider.publish(slug=slug, html_body="", metadata=metadata, image_bytes=None)
+        
+        # Assert
+        mock_sheets_upsert.assert_called_once()
+        call_args = mock_sheets_upsert.call_args[0][0]
+        self.assertEqual(call_args["draft"], "TRUE")
+
+    @patch('cms_providers.framer_sheets_provider.sheets_upsert')
+    def test_publish_handles_draft_status_false(self, mock_sheets_upsert):
+        """
+        Verify that if metadata contains `_draft: False`, the row's 'draft'
+        field is set to "FALSE".
+        """
+        # Arrange
+        slug = "test-slug-published"
+        metadata = {
+            "title": "Published Post",
+            "_draft": False,
+            "excerpt_page": "", "excerpt_featured": "", "reading_time": 1
+        }
+        
+        # Act
+        self.provider.publish(slug=slug, html_body="", metadata=metadata, image_bytes=None)
+        
+        # Assert
+        mock_sheets_upsert.assert_called_once()
+        call_args = mock_sheets_upsert.call_args[0][0]
+        self.assertEqual(call_args["draft"], "FALSE")
 
 
 if __name__ == '__main__':
