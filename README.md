@@ -1,4 +1,5 @@
 # Blog Automation Workflow
+python main.py --provider framer-sheets --auto
 
 This tool supports publishing blog posts to either Webflow or Framer (via Google Sheets + S3).
 
@@ -58,3 +59,5 @@ python main.py --provider framer-sheets --auto
 3. Create a Google Service Account and download the JSON credentials file
 4. Set up an S3 bucket for image storage
 5. Configure the environment variables listed above 
+
+gcloud auth application-default login --scopes=openid,https://www.googleapis.com/auth/userinfo.email,https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/spreadsheets,https://www.googleapis.com/auth/drive.file
